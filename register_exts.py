@@ -1,6 +1,7 @@
-import winreg
+import winreg, os
 
 VBS   = r'C:\Users\toyuv\AppData\Local\TinyTalk\launch.vbs'
+ICON  = r'C:\Users\toyuv\AppData\Local\TinyTalk\icon.ico'
 CMD   = f'wscript.exe "{VBS}" "%1"'
 LABEL = 'Transcribe with TinyTalk'
 
@@ -14,6 +15,8 @@ for e in EXTS:
     base = rf'Software\Classes\SystemFileAssociations\.{e}\shell\TinyTalk'
     with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, base) as k:
         winreg.SetValueEx(k, '', 0, winreg.REG_SZ, LABEL)
+        if os.path.exists(ICON):
+            winreg.SetValueEx(k, 'Icon', 0, winreg.REG_SZ, ICON)
     with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, base + r'\command') as k:
         winreg.SetValueEx(k, '', 0, winreg.REG_SZ, CMD)
     print(f'  registered .{e}')

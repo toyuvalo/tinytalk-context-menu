@@ -23,6 +23,7 @@ pyinstaller --onefile --windowed ^
     --name "TinyTalk_Setup" ^
     --icon "icon.ico" ^
     --add-data "tinytalk.py;." ^
+    --add-data "icon.ico;." ^
     installer.py
 
 if not exist dist\TinyTalk_Setup.exe (

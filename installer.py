@@ -20,6 +20,7 @@ else:
     BUNDLE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 BUNDLED_SCRIPT = os.path.join(BUNDLE_DIR, "tinytalk.py")
+BUNDLED_ICON   = os.path.join(BUNDLE_DIR, "icon.ico")
 
 # ── Palette ───────────────────────────────────────────────────────────────────
 C_BG      = "#090909"
@@ -324,9 +325,14 @@ class Installer(tk.Tk):
                 shutil.rmtree(INSTALL_DIR)
             os.makedirs(INSTALL_DIR)
 
-            # Copy tinytalk.py
+            # Copy tinytalk.py and icon.ico
             dst_script = os.path.join(INSTALL_DIR, "tinytalk.py")
             shutil.copy2(BUNDLED_SCRIPT, dst_script)
+
+            dst_icon = os.path.join(INSTALL_DIR, "icon.ico")
+            if os.path.exists(BUNDLED_ICON):
+                shutil.copy2(BUNDLED_ICON, dst_icon)
+            self._dst_icon = dst_icon
 
             # Copy bundled ffmpeg.exe if we downloaded one
             ffmpeg_tmp = getattr(self, "_ffmpeg_tmp", None)
@@ -376,10 +382,14 @@ class Installer(tk.Tk):
                  f"SystemFileAssociations\\audio"] +
                 [f"SystemFileAssociations\\.{e}" for e in VIDEO_EXTS + AUDIO_EXTS]
             )
+            icon = getattr(self, "_dst_icon", "")
             for target in targets:
                 key = f"HKCU\\Software\\Classes\\{target}\\shell\\TinyTalk"
                 subprocess.run(["reg", "add", key, "/ve", "/d", label, "/f"],
                                capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                if icon and os.path.exists(icon):
+                    subprocess.run(["reg", "add", key, "/v", "Icon", "/d", icon, "/f"],
+                                   capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
                 subprocess.run(["reg", "add", f"{key}\\command", "/ve", "/d", cmd, "/f"],
                                capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
             return True, f"registered for {len(VIDEO_EXTS)} video + {len(AUDIO_EXTS)} audio formats"
