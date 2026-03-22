@@ -10,7 +10,7 @@ import shutil
 import urllib.request
 import json
 import tkinter as tk
-from tkinter import font as tkfont
+from tkinter import font as tkfont, ttk
 
 # ── Config ────────────────────────────────────────────────────────────────────
 MODEL_SIZE   = "base"      # tiny | base | small | medium | large-v3
@@ -113,6 +113,23 @@ class App(tk.Tk):
 
         tk.Frame(self, bg=C_BG, height=6).pack()
 
+        # Progress bar
+        style = ttk.Style()
+        style.theme_use("clam")
+        style.configure("TinyTalk.Horizontal.TProgressbar",
+                        troughcolor=C_CARD, background=C_ACCENT,
+                        bordercolor=C_BG, lightcolor=C_ACCENT, darkcolor=C_ACCENT)
+        self.progress = ttk.Progressbar(
+            self,
+            style="TinyTalk.Horizontal.TProgressbar",
+            mode="indeterminate",
+            length=100,
+        )
+        self.progress.pack(fill="x", padx=28)
+        self.progress.start(12)
+
+        tk.Frame(self, bg=C_BG, height=6).pack()
+
         log_wrap = tk.Frame(self, bg=C_BG, padx=28)
         log_wrap.pack(fill="both", expand=True)
 
@@ -163,7 +180,11 @@ class App(tk.Tk):
             segments, info = model.transcribe(self.file_path, beam_size=5)
 
             lang = info.language.upper() if info.language else "?"
+            duration = info.duration or 1
             self.after(0, self._set_status, f"transcribing  [{lang}]  ...", C_YELLOW)
+
+            # Switch progress bar to determinate now that we know the duration
+            self.after(0, self._progress_start_determinate)
 
             lines = []
             for seg in segments:
@@ -171,6 +192,8 @@ class App(tk.Tk):
                 if text:
                     lines.append(text)
                     self.after(0, self._append_log, text, "text")
+                pct = min(seg.end / duration * 100, 99)
+                self.after(0, self._progress_set, pct)
 
             with open(self.out_path, "w", encoding="utf-8") as f:
                 f.write("\n".join(lines))
@@ -182,6 +205,7 @@ class App(tk.Tk):
 
     def _done(self, lang):
         self._stop_spin()
+        self._progress_set(100)
         self._append_log(f"\n✓  saved to: {os.path.basename(self.out_path)}", "ok")
         self._set_status(f"✓  done  [{lang}]  →  {os.path.basename(self.out_path)}", C_SUCCESS)
         self.open_btn.pack(side="left")
@@ -189,6 +213,7 @@ class App(tk.Tk):
 
     def _err(self, msg):
         self._stop_spin()
+        self.progress.stop()
         self._append_log(f"✗  {msg}", "err")
         self._set_status("something went wrong", C_ERROR)
         self._done_evt.set()
@@ -242,6 +267,16 @@ class App(tk.Tk):
 
         except Exception:
             pass  # No internet, timeout, etc — never interrupt the user
+
+    # ── Progress ──────────────────────────────────────────────────────────────
+
+    def _progress_start_determinate(self):
+        self.progress.stop()
+        self.progress.config(mode="determinate", maximum=100, value=0)
+
+    def _progress_set(self, value):
+        self.progress.config(mode="determinate")
+        self.progress["value"] = value
 
     # ── Spinner ───────────────────────────────────────────────────────────────
 
