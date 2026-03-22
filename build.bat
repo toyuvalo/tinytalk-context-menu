@@ -15,9 +15,13 @@ if %errorlevel% neq 0 (
     pip install pyinstaller --quiet
 )
 
+echo Generating icon...
+python make_icon.py
+
 echo Building TinyTalk_Setup.exe...
 pyinstaller --onefile --windowed ^
     --name "TinyTalk_Setup" ^
+    --icon "icon.ico" ^
     --add-data "tinytalk.py;." ^
     installer.py
 
