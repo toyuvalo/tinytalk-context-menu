@@ -173,7 +173,25 @@ class App(tk.Tk):
             return
 
         try:
-            self.after(0, self._set_status, f"loading model ({MODEL_SIZE})...", C_YELLOW)
+            # Wipe any broken partial download before trying to load
+            if os.path.exists(MODEL_CACHE):
+                incomplete = [
+                    f for root, _, files in os.walk(MODEL_CACHE)
+                    for f in files if f.endswith(".incomplete")
+                ]
+                if incomplete:
+                    shutil.rmtree(MODEL_CACHE)
+                    self.after(0, self._append_log,
+                               "Cleared broken cache, re-downloading model...", "dim")
+
+            if os.path.exists(MODEL_CACHE):
+                self.after(0, self._set_status, f"loading model ({MODEL_SIZE})...", C_YELLOW)
+            else:
+                self.after(0, self._set_status,
+                           f"downloading model ({MODEL_SIZE}, ~300 MB, one time only)...", C_YELLOW)
+                self.after(0, self._append_log,
+                           "Downloading Whisper model — this only happens once.", "dim")
+
             model = WhisperModel(MODEL_SIZE, device="cpu", compute_type=COMPUTE_TYPE)
 
             self.after(0, self._set_status, "transcribing...", C_YELLOW)
@@ -227,9 +245,13 @@ class App(tk.Tk):
         """Silently check HuggingFace for a newer model. Download in background,
         report after transcription is done so it doesn't clutter the output."""
         try:
-            # Need a cached model to compare against
+            # Need a clean cached model to compare against
             if not os.path.exists(MODEL_REFS):
                 return
+            incomplete = [f for r, _, files in os.walk(MODEL_CACHE)
+                          for f in files if f.endswith(".incomplete")]
+            if incomplete:
+                return  # Broken cache — _run will fix it
 
             with open(MODEL_REFS) as f:
                 local_sha = f.read().strip()
