@@ -195,7 +195,8 @@ class App(tk.Tk):
             model = WhisperModel(MODEL_SIZE, device="cpu", compute_type=COMPUTE_TYPE)
 
             self.after(0, self._set_status, "transcribing...", C_YELLOW)
-            segments, info = model.transcribe(self.file_path, beam_size=5)
+            segments, info = model.transcribe(self.file_path, beam_size=5,
+                                             word_timestamps=True)
 
             lang = info.language.upper() if info.language else "?"
             duration = info.duration or 1
@@ -214,12 +215,32 @@ class App(tk.Tk):
                 return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
 
             lines = []
-            for seg in segments:
-                text = seg.text.strip()
+            # Split at sentence boundaries (., ?, !, ,) using word-level timestamps
+            # so every clause gets its own timestamped line.
+            cur_words  = []
+            cur_start  = None
+
+            def _flush():
+                if not cur_words:
+                    return
+                ts   = _fmt_ts(cur_start)
+                text = "".join(cur_words).strip()
                 if text:
-                    ts = _fmt_ts(seg.start)
-                    lines.append(f"[{ts}] {text}")
-                    self.after(0, self._append_log, f"[{ts}] {text}", "text")
+                    line = f"[{ts}] {text}"
+                    lines.append(line)
+                    self.after(0, self._append_log, line, "text")
+                cur_words.clear()
+
+            for seg in segments:
+                for w in (seg.words or []):
+                    word = w.word  # includes leading space, e.g. " Hello"
+                    if cur_start is None:
+                        cur_start = w.start
+                    cur_words.append(word)
+                    stripped = word.strip()
+                    if stripped and stripped[-1] in ".?!,":
+                        _flush()
+                        cur_start = None
                 pct = min(seg.end / duration * 100, 99)
                 self.after(0, self._progress_set, pct)
 
@@ -234,6 +255,8 @@ class App(tk.Tk):
                         eta_str = f"{int(remaining)}s"
                     self.after(0, self._set_status,
                                f"transcribing  [{lang}]  ~{eta_str} left", C_YELLOW)
+
+            _flush()  # emit any trailing words that didn't end with punctuation
 
             with open(self.out_path, "w", encoding="utf-8") as f:
                 f.write("\n".join(lines))
