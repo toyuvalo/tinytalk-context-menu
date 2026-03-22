@@ -251,10 +251,14 @@ class Installer(tk.Tk):
             # Write launch.vbs (silent launcher, no console)
             vbs_path = os.path.join(INSTALL_DIR, "launch.vbs")
             with open(vbs_path, "w") as f:
+                # Use Chr(34) for every quote — avoids the double-quote bug
+                # that breaks paths containing spaces (e.g. "F:\Fruity Loops\...")
                 f.write(
                     'Set sh = CreateObject("WScript.Shell")\n'
-                    f'sh.Run """{self._pythonw}"" ""{dst_script}"" """ '
-                    '& Chr(34) & WScript.Arguments(0) & Chr(34), 0, False\n'
+                    f'sh.Run Chr(34) & "{self._pythonw}" & Chr(34)'
+                    f' & " " & Chr(34) & "{dst_script}" & Chr(34)'
+                    ' & " " & Chr(34) & WScript.Arguments(0) & Chr(34)'
+                    ', 0, False\n'
                 )
 
             self._dst_script = dst_script
