@@ -25,7 +25,7 @@ BUNDLED_SCRIPT = os.path.join(BUNDLE_DIR, "tinytalk.py")
 C_BG      = "#090909"
 C_CARD    = "#101010"
 C_BORDER  = "#1f1f1f"
-C_ACCENT  = "#c8ff00"
+C_ACCENT  = "#00d9d9"
 C_TEXT    = "#f0f0f0"
 C_DIM     = "#3a3a3a"
 C_MID     = "#666666"
@@ -151,7 +151,7 @@ class Installer(tk.Tk):
             text="INSTALL  ↓",
             font=f_btn,
             bg=C_ACCENT, fg="#000000",
-            activebackground="#b0e000", activeforeground="#000000",
+            activebackground="#00b8b8", activeforeground="#000000",
             relief="flat", bd=0, pady=11,
             cursor="hand2",
             command=self._start,

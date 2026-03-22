@@ -15,7 +15,7 @@ MODEL_SIZE = "base"   # tiny | base | small | medium | large-v3
 C_BG      = "#090909"
 C_CARD    = "#101010"
 C_BORDER  = "#1f1f1f"
-C_ACCENT  = "#c8ff00"
+C_ACCENT  = "#00d9d9"
 C_TEXT    = "#f0f0f0"
 C_DIM     = "#3a3a3a"
 C_MID     = "#666666"
@@ -133,7 +133,7 @@ class App(tk.Tk):
             text="OPEN TRANSCRIPT  ↗",
             font=f_btn,
             bg=C_ACCENT, fg="#000000",
-            activebackground="#b0e000", activeforeground="#000000",
+            activebackground="#00b8b8", activeforeground="#000000",
             relief="flat", bd=0, padx=16, pady=8,
             cursor="hand2",
             command=self._open_file,
