@@ -36,7 +36,7 @@ class App(tk.Tk):
         self._spin_idx = 0
         self._spin_job = None
 
-        self.title("→ TXT")
+        self.title("TinyTalk")
         self.configure(bg=C_BG)
         self.resizable(False, False)
 
@@ -64,11 +64,11 @@ class App(tk.Tk):
         hdr = tk.Frame(self, bg=C_BG, padx=28)
         hdr.pack(fill="x")
 
-        tk.Label(hdr, text="→TXT", font=f_title, bg=C_BG, fg=C_ACCENT).pack(side="left")
+        tk.Label(hdr, text="TinyTalk", font=f_title, bg=C_BG, fg=C_ACCENT).pack(side="left")
 
         meta = tk.Frame(hdr, bg=C_BG)
         meta.pack(side="left", padx=(12, 0), pady=(8, 0))
-        tk.Label(meta, text=f"whisper transcriber  /  model: {MODEL_SIZE}",
+        tk.Label(meta, text=f"whisper transcriber · tinytalk  /  model: {MODEL_SIZE}",
                  font=f_tiny, bg=C_BG, fg=C_MID).pack(anchor="w")
         tk.Label(meta, text=f"→ {os.path.dirname(self.out_path)}",
                  font=f_tiny, bg=C_BG, fg=C_DIM).pack(anchor="w")
