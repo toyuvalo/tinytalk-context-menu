@@ -206,21 +206,50 @@ class Installer(tk.Tk):
         return True, pythonw
 
     def _step_install_whisper(self):
-        self.after(0, self._set_status, "installing faster-whisper...", C_YELLOW)
-        # Always use system Python — never sys.executable when frozen (that's the .exe, not Python)
+        # Always use system Python — never sys.executable when frozen
         python = shutil.which("python") or shutil.which("py")
         if not python:
             return False, "Python not found"
-        try:
-            result = subprocess.run(
-                [python, "-m", "pip", "install",
-                 "faster-whisper", "resemblyzer", "scikit-learn", "--quiet"],
+
+        def _is_installed(pkg):
+            r = subprocess.run(
+                [python, "-m", "pip", "show", pkg],
+                capture_output=True,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            return r.returncode == 0
+
+        def _install(pkg, label):
+            self.after(0, self._set_status, f"installing {label}...", C_YELLOW)
+            if _is_installed(pkg):
+                return True, None   # already present, skip
+            r = subprocess.run(
+                [python, "-m", "pip", "install", pkg, "--quiet"],
                 capture_output=True, text=True,
                 creationflags=subprocess.CREATE_NO_WINDOW,
             )
-            if result.returncode != 0:
-                return False, result.stderr.strip() or "pip install failed"
-            return True, "faster-whisper + resemblyzer + scikit-learn installed"
+            if r.returncode != 0:
+                return False, r.stderr.strip() or f"{pkg} install failed"
+            return True, None
+
+        try:
+            packages = [
+                ("faster-whisper", "faster-whisper"),
+                ("resemblyzer",    "resemblyzer (speaker detection)"),
+                ("scikit-learn",   "scikit-learn"),
+            ]
+            newly = []
+            for pkg, label in packages:
+                already = _is_installed(pkg)
+                if not already:
+                    ok, err = _install(pkg, label)
+                    if not ok:
+                        return False, err
+                    newly.append(pkg)
+
+            if newly:
+                return True, f"installed: {', '.join(newly)}"
+            return True, "all packages already up to date"
         except Exception as e:
             return False, str(e)
 
