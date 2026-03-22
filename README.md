@@ -6,6 +6,14 @@ TinyTalk adds a single right-click option to every audio and video file on Windo
 
 ---
 
+## Screenshots
+
+| Installer | Transcribing | Done |
+|-----------|-------------|------|
+| ![Installer](screenshots/installer.png) | ![Transcribing](screenshots/transcribing.png) | ![Done](screenshots/done.png) |
+
+---
+
 ## Install
 
 Download **[TinyTalk_Setup.exe](../../releases/latest)** and run it.
@@ -28,12 +36,23 @@ First transcription is instant — no waiting for downloads.
 
 1. Right-click any audio or video file
 2. Click **Transcribe with TinyTalk**
-3. Transcript streams in live, segment by segment
+3. Transcript streams live with per-sentence timestamps and speaker labels
 4. Hit **Open Transcript** when done
 
 The `.txt` file is saved in the same folder as your source file.
 
 **Supported formats:** `.mp3` `.wav` `.m4a` `.flac` `.ogg` `.aac` `.mp4` `.mkv` `.mov` `.webm` `.avi` and more
+
+### Transcript format
+
+```
+[0:00] SPEAKER 1: So the main issue we ran into
+[0:03] SPEAKER 1: was the timeline shifting on us.
+[0:06] SPEAKER 2: Right,
+[0:07] SPEAKER 2: and that pushed everything back by a week.
+```
+
+Timestamps are per-sentence, based on word-level timestamps from Whisper. Speaker labels appear automatically when multiple speakers are detected — no configuration needed.
 
 ---
 

@@ -213,13 +213,14 @@ class Installer(tk.Tk):
             return False, "Python not found"
         try:
             result = subprocess.run(
-                [python, "-m", "pip", "install", "faster-whisper", "--quiet"],
+                [python, "-m", "pip", "install",
+                 "faster-whisper", "resemblyzer", "scikit-learn", "--quiet"],
                 capture_output=True, text=True,
                 creationflags=subprocess.CREATE_NO_WINDOW,
             )
             if result.returncode != 0:
                 return False, result.stderr.strip() or "pip install failed"
-            return True, "faster-whisper installed"
+            return True, "faster-whisper + resemblyzer + scikit-learn installed"
         except Exception as e:
             return False, str(e)
 

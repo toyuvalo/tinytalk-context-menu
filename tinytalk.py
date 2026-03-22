@@ -20,6 +20,10 @@ MODEL_CACHE  = os.path.join(os.path.expanduser("~"), ".cache", "huggingface",
                             "hub", f"models--Systran--faster-whisper-{MODEL_SIZE}")
 MODEL_REFS   = os.path.join(MODEL_CACHE, "refs", "main")
 
+INSTALL_DIR  = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "TinyTalk")
+# Ensure bundled ffmpeg.exe is always findable, even when launched outside the VBS
+os.environ["PATH"] = INSTALL_DIR + os.pathsep + os.environ.get("PATH", "")
+
 # ── Palette ───────────────────────────────────────────────────────────────────
 C_BG      = "#090909"
 C_CARD    = "#101010"
@@ -194,9 +198,24 @@ class App(tk.Tk):
 
             model = WhisperModel(MODEL_SIZE, device="cpu", compute_type=COMPUTE_TYPE)
 
+            # Speaker diarization (optional — skipped gracefully if libs missing)
+            diarization = self._diarize(self.file_path)
+            if diarization:
+                n_spk = len(set(lbl for _, _, lbl in diarization))
+                self.after(0, self._append_log,
+                           f"  {n_spk} speaker{'s' if n_spk != 1 else ''} detected", "dim")
+
+            def _speaker_at(t):
+                if not diarization:
+                    return None
+                for s, e, lbl in diarization:
+                    if s <= t < e:
+                        return lbl
+                return diarization[-1][2]
+
             self.after(0, self._set_status, "transcribing...", C_YELLOW)
             segments, info = model.transcribe(self.file_path, beam_size=5,
-                                             word_timestamps=True)
+                                              word_timestamps=True)
 
             lang = info.language.upper() if info.language else "?"
             duration = info.duration or 1
@@ -214,40 +233,49 @@ class App(tk.Tk):
                 s = int(secs % 60)
                 return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
 
-            lines = []
-            # Split at sentence boundaries (., ?, !, ,) using word-level timestamps
-            # so every clause gets its own timestamped line.
-            cur_words  = []
-            cur_start  = None
+            lines  = []
+            # Use a mutable state dict so the inner closure can update all fields
+            st = {"words": [], "start": None, "speaker": None}
 
             def _flush():
-                if not cur_words:
+                if not st["words"]:
                     return
-                ts   = _fmt_ts(cur_start)
-                text = "".join(cur_words).strip()
+                ts   = _fmt_ts(st["start"])
+                text = "".join(st["words"]).strip()
                 if text:
-                    line = f"[{ts}] {text}"
+                    spk  = f"{st['speaker']}: " if st["speaker"] else ""
+                    line = f"[{ts}] {spk}{text}"
                     lines.append(line)
                     self.after(0, self._append_log, line, "text")
-                cur_words.clear()
+                st["words"].clear()
+                st["start"]   = None
+                st["speaker"] = None
 
             for seg in segments:
                 for w in (seg.words or []):
-                    word = w.word  # includes leading space, e.g. " Hello"
-                    if cur_start is None:
-                        cur_start = w.start
-                    cur_words.append(word)
-                    stripped = word.strip()
-                    if stripped and stripped[-1] in ".?!,":
+                    word     = w.word
+                    word_t   = w.start if w.start is not None else seg.start
+                    word_spk = _speaker_at(word_t)
+
+                    # Flush on speaker change mid-sentence
+                    if st["speaker"] is not None and word_spk != st["speaker"] and st["words"]:
                         _flush()
-                        cur_start = None
+
+                    if st["start"] is None:
+                        st["start"]   = word_t
+                        st["speaker"] = word_spk
+                    st["words"].append(word)
+
+                    if word.strip() and word.strip()[-1] in ".?!,":
+                        _flush()
+
                 pct = min(seg.end / duration * 100, 99)
                 self.after(0, self._progress_set, pct)
 
                 # ETA: based on measured speed so far (self-corrects as it runs)
                 elapsed = _time.monotonic() - t_start
                 if elapsed > 1 and seg.end > 0:
-                    speed = seg.end / elapsed          # audio-seconds per wall-second
+                    speed     = seg.end / elapsed
                     remaining = (duration - seg.end) / speed
                     if remaining >= 60:
                         eta_str = f"{int(remaining // 60)}m {int(remaining % 60)}s"
@@ -256,7 +284,7 @@ class App(tk.Tk):
                     self.after(0, self._set_status,
                                f"transcribing  [{lang}]  ~{eta_str} left", C_YELLOW)
 
-            _flush()  # emit any trailing words that didn't end with punctuation
+            _flush()  # trailing words
 
             with open(self.out_path, "w", encoding="utf-8") as f:
                 f.write("\n".join(lines))
@@ -265,6 +293,94 @@ class App(tk.Tk):
 
         except Exception as exc:
             self.after(0, self._err, str(exc))
+
+    # ── Speaker diarization ───────────────────────────────────────────────────
+
+    def _diarize(self, audio_path):
+        """Return [(start, end, 'SPEAKER N'), ...] or None if unavailable/single speaker.
+        Uses resemblyzer (speaker embeddings) + scikit-learn (clustering).
+        Falls back silently if either library is missing or diarization fails.
+        Audio extraction handled by ffmpeg so any format works."""
+        try:
+            import numpy as np
+            from resemblyzer import VoiceEncoder
+            from sklearn.cluster import AgglomerativeClustering
+        except ImportError:
+            return None
+
+        try:
+            import tempfile, wave as _wave
+
+            self.after(0, self._set_status, "detecting speakers...", C_YELLOW)
+
+            # Extract 16 kHz mono WAV with ffmpeg (handles all audio/video formats)
+            ffmpeg = shutil.which("ffmpeg")
+            if not ffmpeg:
+                return None
+
+            tmp = tempfile.mktemp(suffix=".wav")
+            r = subprocess.run(
+                [ffmpeg, "-i", audio_path,
+                 "-ac", "1", "-ar", "16000", "-acodec", "pcm_s16le", "-y", tmp],
+                capture_output=True,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            if r.returncode != 0 or not os.path.exists(tmp):
+                return None
+
+            # Load PCM with stdlib wave — no librosa needed
+            with _wave.open(tmp, "rb") as wf:
+                frames = wf.readframes(wf.getnframes())
+            os.remove(tmp)
+
+            wav = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
+            sr  = 16000
+            dur = len(wav) / sr
+
+            if dur < 6:
+                return None  # too short for meaningful diarization
+
+            # Sliding window speaker embeddings
+            encoder  = VoiceEncoder()
+            win_sec  = 1.5
+            step_sec = 0.5
+            embeddings, centers = [], []
+            t = 0.0
+            while t + win_sec <= dur:
+                chunk = wav[int(t * sr): int((t + win_sec) * sr)]
+                embeddings.append(encoder.embed_utterance(chunk))
+                centers.append(t + win_sec / 2)
+                t += step_sec
+
+            if len(embeddings) < 6:
+                return None
+
+            X = np.array(embeddings)   # already L2-normalised by resemblyzer
+
+            # Agglomerative clustering — threshold controls sensitivity
+            clustering = AgglomerativeClustering(
+                n_clusters=None, distance_threshold=0.65, linkage="ward"
+            )
+            labels = clustering.fit_predict(X)
+
+            if len(set(labels)) <= 1:
+                return None  # single speaker — don't add labels
+
+            # Build contiguous speaker segments
+            timeline = []
+            seg_start = max(0.0, centers[0] - step_sec / 2)
+            prev      = labels[0]
+            for i in range(1, len(labels)):
+                if labels[i] != prev:
+                    seg_end = centers[i - 1] + step_sec / 2
+                    timeline.append((seg_start, seg_end, f"SPEAKER {prev + 1}"))
+                    seg_start = seg_end
+                    prev      = labels[i]
+            timeline.append((seg_start, dur, f"SPEAKER {prev + 1}"))
+            return timeline
+
+        except Exception:
+            return None   # never crash the main transcription
 
     def _done(self, lang):
         self._stop_spin()
