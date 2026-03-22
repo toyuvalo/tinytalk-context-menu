@@ -325,16 +325,34 @@ class Installer(tk.Tk):
 
     def _step_register_menu(self):
         self.after(0, self._set_status, "writing registry...", C_YELLOW)
-        cmd = f'wscript.exe "{self._vbs_path}" "%1"'
+        cmd   = f'wscript.exe "{self._vbs_path}" "%1"'
         label = "Transcribe with TinyTalk"
+
+        # Register under perceived types (fallback) AND specific extensions
+        # (primary) — the extension-level entry always shows regardless of
+        # which app is set as the default handler for that format.
+        VIDEO_EXTS = [
+            "mp4", "mkv", "mov", "avi", "wmv", "m4v", "webm",
+            "flv", "ts", "mts", "m2ts", "mpg", "mpeg", "3gp", "ogv",
+        ]
+        AUDIO_EXTS = [
+            "mp3", "wav", "flac", "aac", "ogg", "m4a",
+            "wma", "opus", "aiff", "aif",
+        ]
+
         try:
-            for ptype in ("audio", "video"):
-                key = f"HKCU\\Software\\Classes\\SystemFileAssociations\\{ptype}\\shell\\TinyTalk"
+            targets = (
+                [f"SystemFileAssociations\\video",
+                 f"SystemFileAssociations\\audio"] +
+                [f"SystemFileAssociations\\.{e}" for e in VIDEO_EXTS + AUDIO_EXTS]
+            )
+            for target in targets:
+                key = f"HKCU\\Software\\Classes\\{target}\\shell\\TinyTalk"
                 subprocess.run(["reg", "add", key, "/ve", "/d", label, "/f"],
                                capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
                 subprocess.run(["reg", "add", f"{key}\\command", "/ve", "/d", cmd, "/f"],
                                capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
-            return True, "registered for audio + video"
+            return True, f"registered for {len(VIDEO_EXTS)} video + {len(AUDIO_EXTS)} audio formats"
         except Exception as e:
             return False, str(e)
 
