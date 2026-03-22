@@ -207,12 +207,19 @@ class App(tk.Tk):
             import time as _time
             t_start = _time.monotonic()
 
+            def _fmt_ts(secs):
+                h = int(secs // 3600)
+                m = int((secs % 3600) // 60)
+                s = int(secs % 60)
+                return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+
             lines = []
             for seg in segments:
                 text = seg.text.strip()
                 if text:
-                    lines.append(text)
-                    self.after(0, self._append_log, text, "text")
+                    ts = _fmt_ts(seg.start)
+                    lines.append(f"[{ts}] {text}")
+                    self.after(0, self._append_log, f"[{ts}] {text}", "text")
                 pct = min(seg.end / duration * 100, 99)
                 self.after(0, self._progress_set, pct)
 

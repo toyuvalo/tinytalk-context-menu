@@ -42,10 +42,17 @@ MODEL_CACHE = os.path.join(os.path.expanduser("~"), ".cache", "huggingface",
 STEPS = [
     "Check Python",
     "Install faster-whisper",
+    "Check ffmpeg",
     "Download Whisper model",
     "Copy files",
     "Register context menu",
 ]
+
+# ffmpeg essentials build (static, ~70 MB) — BtbN GitHub releases
+FFMPEG_URL = (
+    "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/"
+    "ffmpeg-master-latest-win64-gpl.zip"
+)
 
 
 class Installer(tk.Tk):
@@ -174,6 +181,7 @@ class Installer(tk.Tk):
         steps = [
             self._step_check_python,
             self._step_install_whisper,
+            self._step_check_ffmpeg,
             self._step_download_model,
             self._step_copy_files,
             self._step_register_menu,
@@ -215,6 +223,48 @@ class Installer(tk.Tk):
         except Exception as e:
             return False, str(e)
 
+    def _step_check_ffmpeg(self):
+        self.after(0, self._set_status, "checking ffmpeg...", C_YELLOW)
+        import urllib.request, zipfile, io
+
+        if shutil.which("ffmpeg"):
+            return True, "ffmpeg already in PATH"
+
+        # Try winget first (fast, silent)
+        try:
+            r = subprocess.run(
+                ["winget", "install", "Gyan.FFmpeg", "-e", "--silent",
+                 "--accept-package-agreements", "--accept-source-agreements"],
+                capture_output=True, text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+                timeout=120,
+            )
+            if r.returncode == 0 and shutil.which("ffmpeg"):
+                return True, "ffmpeg installed via winget"
+        except Exception:
+            pass
+
+        # Fallback: download static ffmpeg.exe to a temp file; copy step moves it later
+        self.after(0, self._set_status, "downloading ffmpeg (~70 MB)...", C_YELLOW)
+        try:
+            import tempfile
+            tmp = tempfile.NamedTemporaryFile(suffix="ffmpeg.exe", delete=False)
+            tmp.close()
+            with urllib.request.urlopen(FFMPEG_URL, timeout=120) as resp:
+                zdata = resp.read()
+            with zipfile.ZipFile(io.BytesIO(zdata)) as zf:
+                for name in zf.namelist():
+                    if name.endswith("/bin/ffmpeg.exe"):
+                        with zf.open(name) as src, open(tmp.name, "wb") as out:
+                            out.write(src.read())
+                        break
+            if os.path.getsize(tmp.name) < 1000:
+                return False, "ffmpeg.exe not found in zip"
+            self._ffmpeg_tmp = tmp.name   # picked up by _step_copy_files
+            return True, "ffmpeg downloaded (will copy with files)"
+        except Exception as e:
+            return False, f"ffmpeg download failed: {e}"
+
     def _step_download_model(self):
         if os.path.exists(MODEL_CACHE):
             return True, f"whisper-{MODEL_SIZE} already cached"
@@ -248,13 +298,19 @@ class Installer(tk.Tk):
             dst_script = os.path.join(INSTALL_DIR, "tinytalk.py")
             shutil.copy2(BUNDLED_SCRIPT, dst_script)
 
-            # Write launch.vbs (silent launcher, no console)
+            # Copy bundled ffmpeg.exe if we downloaded one
+            ffmpeg_tmp = getattr(self, "_ffmpeg_tmp", None)
+            if ffmpeg_tmp and os.path.exists(ffmpeg_tmp):
+                shutil.move(ffmpeg_tmp, os.path.join(INSTALL_DIR, "ffmpeg.exe"))
+
+            # Write launch.vbs — prepends INSTALL_DIR to PATH so bundled ffmpeg is found
             vbs_path = os.path.join(INSTALL_DIR, "launch.vbs")
             with open(vbs_path, "w") as f:
                 # Use Chr(34) for every quote — avoids the double-quote bug
                 # that breaks paths containing spaces (e.g. "F:\Fruity Loops\...")
                 f.write(
                     'Set sh = CreateObject("WScript.Shell")\n'
+                    f'sh.Environment("Process")("PATH") = "{INSTALL_DIR};" & sh.Environment("Process")("PATH")\n'
                     f'sh.Run Chr(34) & "{self._pythonw}" & Chr(34)'
                     f' & " " & Chr(34) & "{dst_script}" & Chr(34)'
                     ' & " " & Chr(34) & WScript.Arguments(0) & Chr(34)'
