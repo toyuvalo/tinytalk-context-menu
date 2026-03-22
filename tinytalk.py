@@ -9,7 +9,8 @@ import tkinter as tk
 from tkinter import font as tkfont
 
 # ── Config ────────────────────────────────────────────────────────────────────
-MODEL_SIZE = "base"   # tiny | base | small | medium | large-v3
+MODEL_SIZE    = "base"     # tiny | base | small | medium | large-v3
+COMPUTE_TYPE  = "default"  # "default" lets CTranslate2 pick; int8 hangs on some CPUs
 
 # ── Palette (matches RipWave) ─────────────────────────────────────────────────
 C_BG      = "#090909"
@@ -151,8 +152,18 @@ class App(tk.Tk):
             return
 
         try:
-            self.after(0, self._set_status, "loading model...", C_YELLOW)
-            model = WhisperModel(MODEL_SIZE, device="cpu", compute_type="int8")
+            # Check if model is already cached to show the right message
+            cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "huggingface",
+                                     "hub", f"models--Systran--faster-whisper-{MODEL_SIZE}")
+            if os.path.exists(cache_dir):
+                self.after(0, self._set_status, f"loading model ({MODEL_SIZE})...", C_YELLOW)
+            else:
+                self.after(0, self._set_status,
+                           f"downloading model ({MODEL_SIZE}, ~150 MB, first run only)...", C_YELLOW)
+                self.after(0, self._append_log,
+                           f"Downloading whisper-{MODEL_SIZE} from HuggingFace — this only happens once.", "dim")
+
+            model = WhisperModel(MODEL_SIZE, device="cpu", compute_type=COMPUTE_TYPE)
 
             self.after(0, self._set_status, "transcribing...", C_YELLOW)
             segments, info = model.transcribe(self.file_path, beam_size=5)
