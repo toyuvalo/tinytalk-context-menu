@@ -193,10 +193,13 @@ class Installer(tk.Tk):
 
     def _step_install_whisper(self):
         self.after(0, self._set_status, "installing faster-whisper...", C_YELLOW)
+        # Always use system Python — never sys.executable when frozen (that's the .exe, not Python)
+        python = shutil.which("python") or shutil.which("py")
+        if not python:
+            return False, "Python not found"
         try:
             result = subprocess.run(
-                [sys.executable if getattr(sys, "frozen", False) else shutil.which("python"),
-                 "-m", "pip", "install", "faster-whisper", "--quiet"],
+                [python, "-m", "pip", "install", "faster-whisper", "--quiet"],
                 capture_output=True, text=True,
                 creationflags=subprocess.CREATE_NO_WINDOW,
             )
@@ -209,7 +212,10 @@ class Installer(tk.Tk):
     def _step_copy_files(self):
         self.after(0, self._set_status, "copying files...", C_YELLOW)
         try:
-            os.makedirs(INSTALL_DIR, exist_ok=True)
+            # Wipe any previous install so only one version ever exists
+            if os.path.exists(INSTALL_DIR):
+                shutil.rmtree(INSTALL_DIR)
+            os.makedirs(INSTALL_DIR)
 
             # Copy tinytalk.py
             dst_script = os.path.join(INSTALL_DIR, "tinytalk.py")
@@ -257,7 +263,8 @@ class Installer(tk.Tk):
             self._log("Note: first transcription downloads the Whisper", "dim")
             self._log("base model (~150 MB). Cached forever after.", "dim")
             self.btn.config(state="normal", bg=C_SUCCESS, fg="#000000",
-                            text="DONE  ✓", cursor="arrow")
+                            text="CLOSE  ✓", cursor="hand2",
+                            command=self.destroy)
         else:
             self._set_status("installation failed", C_ERROR)
             self.btn.config(state="normal", bg=C_ACCENT, fg="#000000",
