@@ -78,3 +78,9 @@ Outputs `dist/TinyTalk_Setup.exe` via PyInstaller.
 - Windows 10/11
 - Python 3.8+
 - [faster-whisper](https://github.com/SYSTRAN/faster-whisper) — installed automatically
+
+---
+
+## License
+
+MIT — free to use, modify, and distribute.
