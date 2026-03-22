@@ -35,9 +35,14 @@ C_YELLOW  = "#ffc400"
 
 SPIN_FRAMES = ["⠋", "⠙", "⠸", "⠴", "⠦", "⠇"]
 
+MODEL_SIZE  = "base"
+MODEL_CACHE = os.path.join(os.path.expanduser("~"), ".cache", "huggingface",
+                           "hub", f"models--Systran--faster-whisper-{MODEL_SIZE}")
+
 STEPS = [
     "Check Python",
     "Install faster-whisper",
+    "Download Whisper model",
     "Copy files",
     "Register context menu",
 ]
@@ -169,6 +174,7 @@ class Installer(tk.Tk):
         steps = [
             self._step_check_python,
             self._step_install_whisper,
+            self._step_download_model,
             self._step_copy_files,
             self._step_register_menu,
         ]
@@ -206,6 +212,27 @@ class Installer(tk.Tk):
             if result.returncode != 0:
                 return False, result.stderr.strip() or "pip install failed"
             return True, "faster-whisper installed"
+        except Exception as e:
+            return False, str(e)
+
+    def _step_download_model(self):
+        if os.path.exists(MODEL_CACHE):
+            return True, f"whisper-{MODEL_SIZE} already cached"
+        self.after(0, self._set_status, f"downloading whisper-{MODEL_SIZE} (~150 MB)...", C_YELLOW)
+        python = shutil.which("python") or shutil.which("py")
+        try:
+            result = subprocess.run(
+                [python, "-c",
+                 "import os; os.environ['HF_HUB_DISABLE_PROGRESS_BARS']='1';"
+                 f"from faster_whisper import WhisperModel;"
+                 f"WhisperModel('{MODEL_SIZE}', device='cpu', compute_type='default');"
+                 "print('done')"],
+                capture_output=True, text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            if result.returncode != 0:
+                return False, result.stderr.strip() or "model download failed"
+            return True, f"whisper-{MODEL_SIZE} ready"
         except Exception as e:
             return False, str(e)
 

@@ -1,18 +1,26 @@
 """
-transcribe-menu — right-click Whisper transcription
-Usage: transcribe.py <audio_or_video_file>
+TinyTalk — right-click Whisper transcription
+Usage: tinytalk.py <audio_or_video_file>
 """
 import sys
 import os
 import threading
+import subprocess
+import shutil
+import urllib.request
+import json
 import tkinter as tk
 from tkinter import font as tkfont
 
 # ── Config ────────────────────────────────────────────────────────────────────
-MODEL_SIZE    = "base"     # tiny | base | small | medium | large-v3
-COMPUTE_TYPE  = "default"  # "default" lets CTranslate2 pick; int8 hangs on some CPUs
+MODEL_SIZE   = "base"      # tiny | base | small | medium | large-v3
+COMPUTE_TYPE = "default"   # default lets CTranslate2 pick; int8 hangs on some CPUs
+MODEL_REPO   = f"Systran/faster-whisper-{MODEL_SIZE}"
+MODEL_CACHE  = os.path.join(os.path.expanduser("~"), ".cache", "huggingface",
+                            "hub", f"models--Systran--faster-whisper-{MODEL_SIZE}")
+MODEL_REFS   = os.path.join(MODEL_CACHE, "refs", "main")
 
-# ── Palette (matches RipWave) ─────────────────────────────────────────────────
+# ── Palette ───────────────────────────────────────────────────────────────────
 C_BG      = "#090909"
 C_CARD    = "#101010"
 C_BORDER  = "#1f1f1f"
@@ -34,8 +42,9 @@ class App(tk.Tk):
         self.out_path  = os.path.splitext(file_path)[0] + ".txt"
         self.fname     = os.path.basename(file_path)
 
-        self._spin_idx = 0
-        self._spin_job = None
+        self._spin_idx  = 0
+        self._spin_job  = None
+        self._done_evt  = threading.Event()   # set when transcription finishes
 
         self.title("TinyTalk")
         self.configure(bg=C_BG)
@@ -48,7 +57,9 @@ class App(tk.Tk):
         sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
         self.geometry(f"{W}x{H}+{(sw - W) // 2}+{(sh - H) // 2}")
 
-        threading.Thread(target=self._run, daemon=True).start()
+        # Transcription and background model update run concurrently
+        threading.Thread(target=self._run,                daemon=True).start()
+        threading.Thread(target=self._check_model_update, daemon=True).start()
 
     # ── UI ────────────────────────────────────────────────────────────────────
 
@@ -64,12 +75,11 @@ class App(tk.Tk):
 
         hdr = tk.Frame(self, bg=C_BG, padx=28)
         hdr.pack(fill="x")
-
         tk.Label(hdr, text="TinyTalk", font=f_title, bg=C_BG, fg=C_ACCENT).pack(side="left")
 
         meta = tk.Frame(hdr, bg=C_BG)
         meta.pack(side="left", padx=(12, 0), pady=(8, 0))
-        tk.Label(meta, text=f"whisper transcriber · tinytalk  /  model: {MODEL_SIZE}",
+        tk.Label(meta, text=f"whisper transcriber  /  model: {MODEL_SIZE}",
                  font=f_tiny, bg=C_BG, fg=C_MID).pack(anchor="w")
         tk.Label(meta, text=f"→ {os.path.dirname(self.out_path)}",
                  font=f_tiny, bg=C_BG, fg=C_DIM).pack(anchor="w")
@@ -77,7 +87,6 @@ class App(tk.Tk):
         tk.Frame(self, bg=C_BORDER, height=1).pack(fill="x", padx=28, pady=(18, 0))
         tk.Frame(self, bg=C_BG, height=12).pack()
 
-        # File name pill
         fname_row = tk.Frame(self, bg=C_BG, padx=28)
         fname_row.pack(fill="x")
         fname_bg = tk.Frame(fname_row, bg=C_CARD, padx=10, pady=5)
@@ -89,7 +98,6 @@ class App(tk.Tk):
         tk.Frame(self, bg=C_BORDER, height=1).pack(fill="x", padx=28)
         tk.Frame(self, bg=C_BG, height=8).pack()
 
-        # Status row
         status_row = tk.Frame(self, bg=C_BG, padx=28)
         status_row.pack(fill="x")
 
@@ -99,14 +107,12 @@ class App(tk.Tk):
         tk.Label(status_row, textvariable=self.spin_var,
                  font=f_status, bg=C_BG, fg=C_ACCENT,
                  width=2, anchor="w").pack(side="left")
-
         self.status_lbl = tk.Label(status_row, textvariable=self.status_var,
                                    font=f_status, bg=C_BG, fg=C_YELLOW, anchor="w")
         self.status_lbl.pack(side="left", fill="x", expand=True)
 
         tk.Frame(self, bg=C_BG, height=6).pack()
 
-        # Transcript log
         log_wrap = tk.Frame(self, bg=C_BG, padx=28)
         log_wrap.pack(fill="both", expand=True)
 
@@ -125,7 +131,6 @@ class App(tk.Tk):
         self.log.tag_config("text", foreground=C_TEXT)
         self.log.tag_config("dim",  foreground=C_DIM)
 
-        # Bottom row (open button, hidden until done)
         self.bottom = tk.Frame(self, bg=C_BG, padx=28)
         self.bottom.pack(fill="x", pady=(10, 20))
 
@@ -139,7 +144,6 @@ class App(tk.Tk):
             cursor="hand2",
             command=self._open_file,
         )
-        # hidden until done
 
     # ── Transcription ─────────────────────────────────────────────────────────
 
@@ -148,21 +152,11 @@ class App(tk.Tk):
         try:
             from faster_whisper import WhisperModel
         except ImportError:
-            self.after(0, self._err, "faster-whisper not installed.\nRun install.bat to set up dependencies.")
+            self.after(0, self._err, "faster-whisper not installed — run the installer again.")
             return
 
         try:
-            # Check if model is already cached to show the right message
-            cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "huggingface",
-                                     "hub", f"models--Systran--faster-whisper-{MODEL_SIZE}")
-            if os.path.exists(cache_dir):
-                self.after(0, self._set_status, f"loading model ({MODEL_SIZE})...", C_YELLOW)
-            else:
-                self.after(0, self._set_status,
-                           f"downloading model ({MODEL_SIZE}, ~150 MB, first run only)...", C_YELLOW)
-                self.after(0, self._append_log,
-                           f"Downloading whisper-{MODEL_SIZE} from HuggingFace — this only happens once.", "dim")
-
+            self.after(0, self._set_status, f"loading model ({MODEL_SIZE})...", C_YELLOW)
             model = WhisperModel(MODEL_SIZE, device="cpu", compute_type=COMPUTE_TYPE)
 
             self.after(0, self._set_status, "transcribing...", C_YELLOW)
@@ -178,7 +172,6 @@ class App(tk.Tk):
                     lines.append(text)
                     self.after(0, self._append_log, text, "text")
 
-            # Write output file
             with open(self.out_path, "w", encoding="utf-8") as f:
                 f.write("\n".join(lines))
 
@@ -192,14 +185,63 @@ class App(tk.Tk):
         self._append_log(f"\n✓  saved to: {os.path.basename(self.out_path)}", "ok")
         self._set_status(f"✓  done  [{lang}]  →  {os.path.basename(self.out_path)}", C_SUCCESS)
         self.open_btn.pack(side="left")
+        self._done_evt.set()
 
     def _err(self, msg):
         self._stop_spin()
         self._append_log(f"✗  {msg}", "err")
         self._set_status("something went wrong", C_ERROR)
+        self._done_evt.set()
 
     def _open_file(self):
         os.startfile(self.out_path)
+
+    # ── Background model update ───────────────────────────────────────────────
+
+    def _check_model_update(self):
+        """Silently check HuggingFace for a newer model. Download in background,
+        report after transcription is done so it doesn't clutter the output."""
+        try:
+            # Need a cached model to compare against
+            if not os.path.exists(MODEL_REFS):
+                return
+
+            with open(MODEL_REFS) as f:
+                local_sha = f.read().strip()
+
+            # Hit the HuggingFace API
+            req = urllib.request.Request(
+                f"https://huggingface.co/api/models/{MODEL_REPO}",
+                headers={"User-Agent": "tinytalk/1.0"},
+            )
+            with urllib.request.urlopen(req, timeout=6) as resp:
+                data = json.loads(resp.read())
+            latest_sha = data.get("sha", "")
+
+            if not latest_sha or latest_sha == local_sha:
+                return  # Already up to date, say nothing
+
+            # Update available — download while transcription runs
+            python = shutil.which("pythonw") or shutil.which("python")
+            proc = subprocess.run(
+                [python, "-c",
+                 "import os; os.environ['HF_HUB_DISABLE_PROGRESS_BARS']='1';"
+                 f"from faster_whisper import WhisperModel;"
+                 f"WhisperModel('{MODEL_SIZE}', device='cpu', compute_type='default')"],
+                capture_output=True,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+
+            # Wait for transcription to finish, then show the result in the log
+            self._done_evt.wait(timeout=600)
+
+            if proc.returncode == 0:
+                self.after(0, self._append_log,
+                           f"\n↑  model updated ({MODEL_SIZE}) — will use next run", "ok")
+            # Silent fail on error — don't distract from the transcript
+
+        except Exception:
+            pass  # No internet, timeout, etc — never interrupt the user
 
     # ── Spinner ───────────────────────────────────────────────────────────────
 
@@ -233,7 +275,7 @@ class App(tk.Tk):
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: transcribe.py <file>")
+        print("Usage: tinytalk.py <file>")
         sys.exit(1)
     app = App(sys.argv[1])
     app.mainloop()
