@@ -204,6 +204,9 @@ class App(tk.Tk):
             # Switch progress bar to determinate now that we know the duration
             self.after(0, self._progress_start_determinate)
 
+            import time as _time
+            t_start = _time.monotonic()
+
             lines = []
             for seg in segments:
                 text = seg.text.strip()
@@ -212,6 +215,18 @@ class App(tk.Tk):
                     self.after(0, self._append_log, text, "text")
                 pct = min(seg.end / duration * 100, 99)
                 self.after(0, self._progress_set, pct)
+
+                # ETA: based on measured speed so far (self-corrects as it runs)
+                elapsed = _time.monotonic() - t_start
+                if elapsed > 1 and seg.end > 0:
+                    speed = seg.end / elapsed          # audio-seconds per wall-second
+                    remaining = (duration - seg.end) / speed
+                    if remaining >= 60:
+                        eta_str = f"{int(remaining // 60)}m {int(remaining % 60)}s"
+                    else:
+                        eta_str = f"{int(remaining)}s"
+                    self.after(0, self._set_status,
+                               f"transcribing  [{lang}]  ~{eta_str} left", C_YELLOW)
 
             with open(self.out_path, "w", encoding="utf-8") as f:
                 f.write("\n".join(lines))
