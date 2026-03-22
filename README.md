@@ -81,6 +81,10 @@ Outputs `dist/TinyTalk_Setup.exe` via PyInstaller.
 
 ---
 
+## More tools like this
+
+Built by [dvlce.ca](https://dvlce.ca) — see [webdev.dvlce.ca](https://webdev.dvlce.ca) for the full project showcase.
+
 ## License
 
-MIT — free to use, modify, and distribute.
+MIT with [Commons Clause](https://commonsclause.com/) — free to use, modify, and share. Commercial resale not permitted.
