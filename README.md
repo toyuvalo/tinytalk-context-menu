@@ -8,9 +8,9 @@ TinyTalk adds a single right-click option to every audio and video file on Windo
 
 ## Screenshots
 
-| Installer | Transcribing | Done |
-|-----------|-------------|------|
-| ![Installer](screenshots/installer.png) | ![Transcribing](screenshots/transcribing.png) | ![Done](screenshots/done.png) |
+| Installer | Ready | Transcribing | Done |
+|-----------|-------|-------------|------|
+| ![Installer](screenshots/installer.png) | ![Ready](screenshots/ready.png) | ![Transcribing](screenshots/transcribing.png) | ![Done](screenshots/done.png) |
 
 ---
 
@@ -37,9 +37,13 @@ Re-running the installer skips everything already in place — only installs wha
 
 1. Right-click any audio or video file
 2. Click **Transcribe with TinyTalk** (teal speech-bubble icon)
-3. Transcript streams live — per-sentence timestamps, speaker labels update in real time
-4. ETA countdown shown while transcribing
-5. Hit **Open Transcript** when done
+3. Choose your options:
+   - **DIRTY AUDIO** — run noise reduction before transcribing (shows estimated time)
+   - **MULTI-SPEAKER** — detect and label multiple speakers automatically
+4. Click **START ▶**
+5. Transcript streams live — per-sentence timestamps, speaker labels update in real time
+6. ETA countdown shown while transcribing
+7. Hit **Open Transcript** when done
 
 The `.txt` file is saved in the same folder as your source file.
 
@@ -58,7 +62,7 @@ The `.txt` file is saved in the same folder as your source file.
 ```
 
 - **Timestamps** are per-sentence, derived from Whisper's word-level timing
-- **Speaker labels** appear automatically when multiple voices are detected — no setup, no API keys
+- **Speaker labels** appear when MULTI-SPEAKER is enabled — no setup, no API keys
 - Lines split on speaker changes mid-sentence as well as at punctuation boundaries
 - Single-speaker files get clean timestamps with no labels
 
@@ -69,7 +73,8 @@ The `.txt` file is saved in the same folder as your source file.
 | Feature | Details |
 |---------|---------|
 | 100% local | No internet required after setup. Nothing leaves your machine. |
-| Speaker detection | Automatic — detects and labels up to N speakers using voice embeddings |
+| Speaker detection | Optional — toggle MULTI-SPEAKER before starting. Detects and labels voices using embeddings. |
+| Noise reduction | Optional — toggle DIRTY AUDIO before starting. Shows estimated time cost up front. |
 | Per-sentence timestamps | Every clause timestamped at word level, not just every few seconds |
 | Live ETA | Calculates remaining time based on measured processing speed |
 | Video support | Transcribes audio track directly from any video container via ffmpeg |

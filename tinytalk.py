@@ -46,12 +46,13 @@ class App(tk.Tk):
         self.out_path  = os.path.splitext(file_path)[0] + ".txt"
         self.fname     = os.path.basename(file_path)
 
-        self._spin_idx     = 0
-        self._spin_job     = None
-        self._done_evt     = threading.Event()   # set when transcription finishes
-        self._clean_audio  = False               # toggled by user before transcription
-        self._transcribing = False               # locks toggle once model starts loading
-        self._file_dur     = None                # populated async from ffmpeg
+        self._spin_idx       = 0
+        self._spin_job       = None
+        self._done_evt       = threading.Event()   # set when transcription finishes
+        self._clean_audio    = False               # toggled by user before transcription
+        self._diarize_enabled = False              # toggled by user before transcription
+        self._transcribing   = False               # locks toggles once processing starts
+        self._file_dur       = None                # populated sync from ffmpeg
 
         self.title("TinyTalk")
         self.configure(bg=C_BG)
@@ -60,13 +61,12 @@ class App(tk.Tk):
         self._probe_duration_sync()   # get file duration before building UI so estimate is shown immediately
         self._build()
 
-        W, H = 520, 420
+        W, H = 520, 460
         self.update_idletasks()
         sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
         self.geometry(f"{W}x{H}+{(sw - W) // 2}+{(sh - H) // 2}")
 
-        # Transcription and background model update run concurrently
-        threading.Thread(target=self._run,                daemon=True).start()
+        # Background model-update check runs immediately; _run waits for START button
         threading.Thread(target=self._check_model_update, daemon=True).start()
 
     # ── UI ────────────────────────────────────────────────────────────────────
@@ -102,20 +102,49 @@ class App(tk.Tk):
         tk.Label(fname_bg, text=self.fname, font=f_file,
                  bg=C_CARD, fg=C_TEXT).pack(side="left")
 
+        # ── Options row ───────────────────────────────────────────────────────
+        tk.Frame(self, bg=C_BG, height=8).pack()
+
+        opts_row = tk.Frame(self, bg=C_BG, padx=28)
+        opts_row.pack(fill="x")
+
+        f_opt = tkfont.Font(family="Consolas", size=9, weight="bold")
+
         eta = self._eta_clean()
-        btn_text = f"✦ CLEAN  {eta}" if eta else "✦ CLEAN AUDIO"
+        dirty_text = f"DIRTY AUDIO  {eta}" if eta else "DIRTY AUDIO"
         self._clean_btn = tk.Button(
-            fname_row,
-            text=btn_text,
-            font=tkfont.Font(family="Consolas", size=9, weight="bold"),
+            opts_row, text=dirty_text, font=f_opt,
             bg=C_CARD, fg=C_ACCENT,
             activebackground=C_YELLOW, activeforeground=C_BG,
-            relief="solid", bd=1, padx=10, pady=4,
+            relief="solid", bd=1, padx=10, pady=6,
             cursor="hand2",
             highlightbackground=C_ACCENT, highlightcolor=C_ACCENT, highlightthickness=1,
             command=self._toggle_clean,
         )
-        self._clean_btn.pack(side="right")
+        self._clean_btn.pack(side="left")
+
+        tk.Frame(opts_row, bg=C_BG, width=8).pack(side="left")
+
+        self._diarize_btn = tk.Button(
+            opts_row, text="MULTI-SPEAKER", font=f_opt,
+            bg=C_CARD, fg=C_ACCENT,
+            activebackground=C_SUCCESS, activeforeground=C_BG,
+            relief="solid", bd=1, padx=10, pady=6,
+            cursor="hand2",
+            highlightbackground=C_ACCENT, highlightcolor=C_ACCENT, highlightthickness=1,
+            command=self._toggle_diarize,
+        )
+        self._diarize_btn.pack(side="left")
+
+        self._start_btn = tk.Button(
+            opts_row, text="START  ▶", font=f_opt,
+            bg=C_ACCENT, fg=C_BG,
+            activebackground="#00b8b8", activeforeground=C_BG,
+            relief="flat", bd=0, padx=14, pady=6,
+            cursor="hand2",
+            command=self._start_processing,
+        )
+        self._start_btn.pack(side="right")
 
         tk.Frame(self, bg=C_BG, height=12).pack()
         tk.Frame(self, bg=C_BORDER, height=1).pack(fill="x", padx=28)
@@ -125,7 +154,7 @@ class App(tk.Tk):
         status_row.pack(fill="x")
 
         self.spin_var   = tk.StringVar(value="")
-        self.status_var = tk.StringVar(value="loading model...")
+        self.status_var = tk.StringVar(value="configure options above  →  then start")
 
         tk.Label(status_row, textvariable=self.spin_var,
                  font=f_status, bg=C_BG, fg=C_ACCENT,
@@ -149,7 +178,7 @@ class App(tk.Tk):
             length=100,
         )
         self.progress.pack(fill="x", padx=28)
-        self.progress.start(12)
+        # Progress bar starts only when user clicks START
 
         tk.Frame(self, bg=C_BG, height=6).pack()
 
@@ -219,33 +248,66 @@ class App(tk.Tk):
     def _update_clean_btn(self):
         eta = self._eta_clean()
         if self._transcribing:
-            # Locked — dim it, but still show ON/OFF state and estimate
             if self._clean_audio:
-                label = f"✦ CLEAN  {eta}  ON" if eta else "✦ CLEAN AUDIO  ON"
+                label = f"DIRTY AUDIO  {eta}  ON" if eta else "DIRTY AUDIO  ON"
                 self._clean_btn.config(bg=C_DIM, fg=C_BG, text=label,
                                        cursor="", relief="flat", bd=0,
                                        highlightthickness=0)
             else:
-                label = f"✦ CLEAN  {eta}" if eta else "✦ CLEAN AUDIO"
+                label = f"DIRTY AUDIO  {eta}" if eta else "DIRTY AUDIO"
                 self._clean_btn.config(bg=C_DIM, fg="#333333", text=label,
                                        cursor="", relief="flat", bd=0,
                                        highlightthickness=0)
         elif self._clean_audio:
-            label = f"✦ CLEAN  {eta}  ON" if eta else "✦ CLEAN AUDIO  ON"
+            label = f"DIRTY AUDIO  {eta}  ON" if eta else "DIRTY AUDIO  ON"
             self._clean_btn.config(bg=C_YELLOW, fg=C_BG, text=label,
                                    cursor="hand2", relief="flat", bd=0,
                                    highlightthickness=0)
         else:
-            label = f"✦ CLEAN  {eta}" if eta else "✦ CLEAN AUDIO"
+            label = f"DIRTY AUDIO  {eta}" if eta else "DIRTY AUDIO"
             self._clean_btn.config(bg=C_CARD, fg=C_ACCENT, text=label,
                                    cursor="hand2", relief="solid", bd=1,
                                    highlightthickness=1)
 
     def _toggle_clean(self):
         if self._transcribing:
-            return   # too late — model already loading
+            return
         self._clean_audio = not self._clean_audio
         self._update_clean_btn()
+
+    def _update_diarize_btn(self):
+        if self._transcribing:
+            if self._diarize_enabled:
+                self._diarize_btn.config(bg=C_DIM, fg=C_BG, text="MULTI-SPEAKER  ON",
+                                         cursor="", relief="flat", bd=0, highlightthickness=0)
+            else:
+                self._diarize_btn.config(bg=C_DIM, fg="#333333", text="MULTI-SPEAKER",
+                                         cursor="", relief="flat", bd=0, highlightthickness=0)
+        elif self._diarize_enabled:
+            self._diarize_btn.config(bg=C_SUCCESS, fg=C_BG, text="MULTI-SPEAKER  ON",
+                                     cursor="hand2", relief="flat", bd=0, highlightthickness=0)
+        else:
+            self._diarize_btn.config(bg=C_CARD, fg=C_ACCENT, text="MULTI-SPEAKER",
+                                     cursor="hand2", relief="solid", bd=1, highlightthickness=1)
+
+    def _toggle_diarize(self):
+        if self._transcribing:
+            return
+        self._diarize_enabled = not self._diarize_enabled
+        self._update_diarize_btn()
+
+    def _start_processing(self):
+        if self._transcribing:
+            return
+        self._transcribing = True
+        self._update_clean_btn()
+        self._update_diarize_btn()
+        self._start_btn.config(text="processing...", bg=C_DIM, fg="#555555",
+                               cursor="", state="disabled")
+        self.after(0, self._set_status, "loading model...", C_YELLOW)
+        self.progress.config(mode="indeterminate")
+        self.progress.start(12)
+        threading.Thread(target=self._run, daemon=True).start()
 
     # ── Audio cleaning ────────────────────────────────────────────────────────
 
@@ -291,8 +353,6 @@ class App(tk.Tk):
     # ── Transcription ─────────────────────────────────────────────────────────
 
     def _run(self):
-        self._transcribing = True                    # lock the clean toggle
-        self.after(0, self._update_clean_btn)        # grey it out visually
         self._start_spin()
         try:
             from faster_whisper import WhisperModel
@@ -332,8 +392,8 @@ class App(tk.Tk):
                     transcribe_path = tmp_clean
                     self.after(0, self._append_log, "  audio cleaned", "dim")
 
-            # Speaker diarization (optional — skipped gracefully if libs missing)
-            diarization = self._diarize(transcribe_path)
+            # Speaker diarization (only if user enabled it)
+            diarization = self._diarize(transcribe_path) if self._diarize_enabled else None
             if diarization:
                 n_spk = len(set(lbl for _, _, lbl in diarization))
                 self.after(0, self._append_log,
