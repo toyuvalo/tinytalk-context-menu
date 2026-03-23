@@ -57,6 +57,7 @@ class App(tk.Tk):
         self.configure(bg=C_BG)
         self.resizable(False, False)
 
+        self._probe_duration_sync()   # get file duration before building UI so estimate is shown immediately
         self._build()
 
         W, H = 520, 420
@@ -65,9 +66,8 @@ class App(tk.Tk):
         self.geometry(f"{W}x{H}+{(sw - W) // 2}+{(sh - H) // 2}")
 
         # Transcription and background model update run concurrently
-        threading.Thread(target=self._run,                  daemon=True).start()
-        threading.Thread(target=self._check_model_update,   daemon=True).start()
-        threading.Thread(target=self._probe_duration,       daemon=True).start()
+        threading.Thread(target=self._run,                daemon=True).start()
+        threading.Thread(target=self._check_model_update, daemon=True).start()
 
     # ── UI ────────────────────────────────────────────────────────────────────
 
@@ -102,14 +102,17 @@ class App(tk.Tk):
         tk.Label(fname_bg, text=self.fname, font=f_file,
                  bg=C_CARD, fg=C_TEXT).pack(side="left")
 
+        eta = self._eta_clean()
+        btn_text = f"✦ CLEAN  {eta}" if eta else "✦ CLEAN AUDIO"
         self._clean_btn = tk.Button(
             fname_row,
-            text="CLEAN AUDIO",
-            font=tkfont.Font(family="Consolas", size=7, weight="bold"),
-            bg=C_DIM, fg=C_MID,
+            text=btn_text,
+            font=tkfont.Font(family="Consolas", size=9, weight="bold"),
+            bg=C_CARD, fg=C_ACCENT,
             activebackground=C_YELLOW, activeforeground=C_BG,
-            relief="flat", bd=0, padx=8, pady=5,
+            relief="solid", bd=1, padx=10, pady=4,
             cursor="hand2",
+            highlightbackground=C_ACCENT, highlightcolor=C_ACCENT, highlightthickness=1,
             command=self._toggle_clean,
         )
         self._clean_btn.pack(side="right")
@@ -184,8 +187,8 @@ class App(tk.Tk):
 
     # ── Clean audio toggle ────────────────────────────────────────────────────
 
-    def _probe_duration(self):
-        """Get file duration via ffmpeg and update the clean button label."""
+    def _probe_duration_sync(self):
+        """Get file duration synchronously via ffmpeg before UI builds."""
         try:
             import re
             ffmpeg = shutil.which("ffmpeg")
@@ -201,7 +204,6 @@ class App(tk.Tk):
                 self._file_dur = (int(m.group(1)) * 3600 +
                                   int(m.group(2)) * 60 +
                                   float(m.group(3)))
-                self.after(0, self._update_clean_btn)
         except Exception:
             pass
 
@@ -215,23 +217,29 @@ class App(tk.Tk):
         return f"~{secs // 60}m {secs % 60}s"
 
     def _update_clean_btn(self):
-        if self._transcribing:
-            # Lock — show final state dimmed
-            eta = self._eta_clean()
-            if self._clean_audio:
-                label = f"CLEAN  {eta}  ON" if eta else "CLEAN AUDIO  ON"
-                self._clean_btn.config(bg=C_DIM, fg=C_BG, text=label, cursor="")
-            else:
-                self._clean_btn.config(bg=C_DIM, fg="#222222",
-                                       text="CLEAN AUDIO", cursor="")
-            return
         eta = self._eta_clean()
-        if self._clean_audio:
-            label = f"CLEAN  {eta}  ON" if eta else "CLEAN AUDIO  ON"
-            self._clean_btn.config(bg=C_YELLOW, fg=C_BG, text=label)
+        if self._transcribing:
+            # Locked — dim it, but still show ON/OFF state and estimate
+            if self._clean_audio:
+                label = f"✦ CLEAN  {eta}  ON" if eta else "✦ CLEAN AUDIO  ON"
+                self._clean_btn.config(bg=C_DIM, fg=C_BG, text=label,
+                                       cursor="", relief="flat", bd=0,
+                                       highlightthickness=0)
+            else:
+                label = f"✦ CLEAN  {eta}" if eta else "✦ CLEAN AUDIO"
+                self._clean_btn.config(bg=C_DIM, fg="#333333", text=label,
+                                       cursor="", relief="flat", bd=0,
+                                       highlightthickness=0)
+        elif self._clean_audio:
+            label = f"✦ CLEAN  {eta}  ON" if eta else "✦ CLEAN AUDIO  ON"
+            self._clean_btn.config(bg=C_YELLOW, fg=C_BG, text=label,
+                                   cursor="hand2", relief="flat", bd=0,
+                                   highlightthickness=0)
         else:
-            label = f"CLEAN  {eta}" if eta else "CLEAN AUDIO"
-            self._clean_btn.config(bg=C_DIM, fg=C_MID, text=label)
+            label = f"✦ CLEAN  {eta}" if eta else "✦ CLEAN AUDIO"
+            self._clean_btn.config(bg=C_CARD, fg=C_ACCENT, text=label,
+                                   cursor="hand2", relief="solid", bd=1,
+                                   highlightthickness=1)
 
     def _toggle_clean(self):
         if self._transcribing:
