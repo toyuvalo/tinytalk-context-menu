@@ -20,9 +20,19 @@ MODEL_CACHE  = os.path.join(os.path.expanduser("~"), ".cache", "huggingface",
                             "hub", f"models--Systran--faster-whisper-{MODEL_SIZE}")
 MODEL_REFS   = os.path.join(MODEL_CACHE, "refs", "main")
 
-INSTALL_DIR  = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "TinyTalk")
-# Ensure bundled ffmpeg.exe is always findable, even when launched outside the VBS
-os.environ["PATH"] = INSTALL_DIR + os.pathsep + os.environ.get("PATH", "")
+if sys.platform == "win32":
+    INSTALL_DIR = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "TinyTalk")
+elif sys.platform == "darwin":
+    INSTALL_DIR = os.path.join(os.path.expanduser("~"), "Library", "Application Support", "TinyTalk")
+else:
+    INSTALL_DIR = os.path.join(os.path.expanduser("~"), ".local", "share", "TinyTalk")
+
+# On Windows, ffmpeg.exe is bundled in INSTALL_DIR — prepend so it's always findable.
+if sys.platform == "win32":
+    os.environ["PATH"] = INSTALL_DIR + os.pathsep + os.environ.get("PATH", "")
+
+# Suppress console windows on Windows; harmless 0 on macOS/Linux
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 # ── Palette ───────────────────────────────────────────────────────────────────
 C_BG      = "#090909"
@@ -226,7 +236,7 @@ class App(tk.Tk):
             r = subprocess.run(
                 [ffmpeg, "-i", self.file_path],
                 capture_output=True, text=True,
-                creationflags=subprocess.CREATE_NO_WINDOW,
+                creationflags=_NO_WINDOW,
             )
             m = re.search(r"Duration:\s*(\d+):(\d+):([\d.]+)", r.stderr)
             if m:
@@ -333,7 +343,7 @@ class App(tk.Tk):
                     [ffmpeg, "-i", audio_path,
                      "-ac", "1", "-ar", "44100", "-y", tmp_in],
                     capture_output=True,
-                    creationflags=subprocess.CREATE_NO_WINDOW,
+                    creationflags=_NO_WINDOW,
                 )
                 if r.returncode == 0:
                     work = tmp_in
@@ -529,7 +539,7 @@ class App(tk.Tk):
                 [ffmpeg, "-i", audio_path,
                  "-ac", "1", "-ar", "16000", "-acodec", "pcm_s16le", "-y", tmp],
                 capture_output=True,
-                creationflags=subprocess.CREATE_NO_WINDOW,
+                creationflags=_NO_WINDOW,
             )
             if r.returncode != 0 or not os.path.exists(tmp):
                 return None
@@ -604,7 +614,12 @@ class App(tk.Tk):
         self._done_evt.set()
 
     def _open_file(self):
-        os.startfile(self.out_path)
+        if sys.platform == "win32":
+            os.startfile(self.out_path)
+        elif sys.platform == "darwin":
+            subprocess.run(["open", self.out_path])
+        else:
+            subprocess.run(["xdg-open", self.out_path])
 
     # ── Background model update ───────────────────────────────────────────────
 
@@ -643,7 +658,7 @@ class App(tk.Tk):
                  f"from faster_whisper import WhisperModel;"
                  f"WhisperModel('{MODEL_SIZE}', device='cpu', compute_type='default')"],
                 capture_output=True,
-                creationflags=subprocess.CREATE_NO_WINDOW,
+                creationflags=_NO_WINDOW,
             )
 
             # Wait for transcription to finish, then show the result in the log
