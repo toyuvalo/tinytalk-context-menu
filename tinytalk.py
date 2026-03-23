@@ -46,9 +46,12 @@ class App(tk.Tk):
         self.out_path  = os.path.splitext(file_path)[0] + ".txt"
         self.fname     = os.path.basename(file_path)
 
-        self._spin_idx  = 0
-        self._spin_job  = None
-        self._done_evt  = threading.Event()   # set when transcription finishes
+        self._spin_idx     = 0
+        self._spin_job     = None
+        self._done_evt     = threading.Event()   # set when transcription finishes
+        self._clean_audio  = False               # toggled by user before transcription
+        self._transcribing = False               # locks toggle once model starts loading
+        self._file_dur     = None                # populated async from ffmpeg
 
         self.title("TinyTalk")
         self.configure(bg=C_BG)
@@ -62,8 +65,9 @@ class App(tk.Tk):
         self.geometry(f"{W}x{H}+{(sw - W) // 2}+{(sh - H) // 2}")
 
         # Transcription and background model update run concurrently
-        threading.Thread(target=self._run,                daemon=True).start()
-        threading.Thread(target=self._check_model_update, daemon=True).start()
+        threading.Thread(target=self._run,                  daemon=True).start()
+        threading.Thread(target=self._check_model_update,   daemon=True).start()
+        threading.Thread(target=self._probe_duration,       daemon=True).start()
 
     # ── UI ────────────────────────────────────────────────────────────────────
 
@@ -97,6 +101,18 @@ class App(tk.Tk):
         fname_bg.pack(side="left")
         tk.Label(fname_bg, text=self.fname, font=f_file,
                  bg=C_CARD, fg=C_TEXT).pack(side="left")
+
+        self._clean_btn = tk.Button(
+            fname_row,
+            text="CLEAN AUDIO",
+            font=tkfont.Font(family="Consolas", size=7, weight="bold"),
+            bg=C_DIM, fg=C_MID,
+            activebackground=C_YELLOW, activeforeground=C_BG,
+            relief="flat", bd=0, padx=8, pady=5,
+            cursor="hand2",
+            command=self._toggle_clean,
+        )
+        self._clean_btn.pack(side="right")
 
         tk.Frame(self, bg=C_BG, height=12).pack()
         tk.Frame(self, bg=C_BORDER, height=1).pack(fill="x", padx=28)
@@ -166,9 +182,109 @@ class App(tk.Tk):
             command=self._open_file,
         )
 
+    # ── Clean audio toggle ────────────────────────────────────────────────────
+
+    def _probe_duration(self):
+        """Get file duration via ffmpeg and update the clean button label."""
+        try:
+            import re
+            ffmpeg = shutil.which("ffmpeg")
+            if not ffmpeg:
+                return
+            r = subprocess.run(
+                [ffmpeg, "-i", self.file_path],
+                capture_output=True, text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            m = re.search(r"Duration:\s*(\d+):(\d+):([\d.]+)", r.stderr)
+            if m:
+                self._file_dur = (int(m.group(1)) * 3600 +
+                                  int(m.group(2)) * 60 +
+                                  float(m.group(3)))
+                self.after(0, self._update_clean_btn)
+        except Exception:
+            pass
+
+    def _eta_clean(self):
+        """Estimated clean time string, or empty string if unknown."""
+        if self._file_dur is None:
+            return ""
+        secs = int(self._file_dur / 5)   # noisereduce ≈ 5x real-time
+        if secs < 60:
+            return f"~{secs}s"
+        return f"~{secs // 60}m {secs % 60}s"
+
+    def _update_clean_btn(self):
+        if self._transcribing:
+            # Lock — show final state dimmed
+            eta = self._eta_clean()
+            if self._clean_audio:
+                label = f"CLEAN  {eta}  ON" if eta else "CLEAN AUDIO  ON"
+                self._clean_btn.config(bg=C_DIM, fg=C_BG, text=label, cursor="")
+            else:
+                self._clean_btn.config(bg=C_DIM, fg="#222222",
+                                       text="CLEAN AUDIO", cursor="")
+            return
+        eta = self._eta_clean()
+        if self._clean_audio:
+            label = f"CLEAN  {eta}  ON" if eta else "CLEAN AUDIO  ON"
+            self._clean_btn.config(bg=C_YELLOW, fg=C_BG, text=label)
+        else:
+            label = f"CLEAN  {eta}" if eta else "CLEAN AUDIO"
+            self._clean_btn.config(bg=C_DIM, fg=C_MID, text=label)
+
+    def _toggle_clean(self):
+        if self._transcribing:
+            return   # too late — model already loading
+        self._clean_audio = not self._clean_audio
+        self._update_clean_btn()
+
+    # ── Audio cleaning ────────────────────────────────────────────────────────
+
+    def _clean_file(self, audio_path):
+        """Denoise audio_path with noisereduce. Returns temp WAV path or None."""
+        try:
+            import noisereduce as nr
+            import soundfile as sf
+        except ImportError:
+            self.after(0, self._append_log,
+                       "  noisereduce not installed — skipping clean", "dim")
+            return None
+        try:
+            import tempfile, numpy as np
+            ffmpeg = shutil.which("ffmpeg")
+            work   = audio_path
+            tmp_in = None
+
+            # Extract to WAV first for non-WAV inputs
+            if ffmpeg and not audio_path.lower().endswith(".wav"):
+                tmp_in = tempfile.mktemp(suffix=".wav")
+                r = subprocess.run(
+                    [ffmpeg, "-i", audio_path,
+                     "-ac", "1", "-ar", "44100", "-y", tmp_in],
+                    capture_output=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                )
+                if r.returncode == 0:
+                    work = tmp_in
+
+            data, rate = sf.read(work)
+            if tmp_in and os.path.exists(tmp_in):
+                os.remove(tmp_in)
+
+            reduced = nr.reduce_noise(y=data, sr=rate, prop_decrease=0.8)
+            tmp_out = tempfile.mktemp(suffix="_clean.wav")
+            sf.write(tmp_out, reduced, rate)
+            return tmp_out
+        except Exception as e:
+            self.after(0, self._append_log, f"  clean failed: {e}", "dim")
+            return None
+
     # ── Transcription ─────────────────────────────────────────────────────────
 
     def _run(self):
+        self._transcribing = True                    # lock the clean toggle
+        self.after(0, self._update_clean_btn)        # grey it out visually
         self._start_spin()
         try:
             from faster_whisper import WhisperModel
@@ -198,8 +314,18 @@ class App(tk.Tk):
 
             model = WhisperModel(MODEL_SIZE, device="cpu", compute_type=COMPUTE_TYPE)
 
+            # Optional: clean audio before transcribing
+            transcribe_path = self.file_path
+            tmp_clean       = None
+            if self._clean_audio:
+                self.after(0, self._set_status, "cleaning audio...", C_YELLOW)
+                tmp_clean = self._clean_file(self.file_path)
+                if tmp_clean:
+                    transcribe_path = tmp_clean
+                    self.after(0, self._append_log, "  audio cleaned", "dim")
+
             # Speaker diarization (optional — skipped gracefully if libs missing)
-            diarization = self._diarize(self.file_path)
+            diarization = self._diarize(transcribe_path)
             if diarization:
                 n_spk = len(set(lbl for _, _, lbl in diarization))
                 self.after(0, self._append_log,
@@ -214,7 +340,7 @@ class App(tk.Tk):
                 return diarization[-1][2]
 
             self.after(0, self._set_status, "transcribing...", C_YELLOW)
-            segments, info = model.transcribe(self.file_path, beam_size=5,
+            segments, info = model.transcribe(transcribe_path, beam_size=5,
                                               word_timestamps=True)
 
             lang = info.language.upper() if info.language else "?"
@@ -289,9 +415,21 @@ class App(tk.Tk):
             with open(self.out_path, "w", encoding="utf-8") as f:
                 f.write("\n".join(lines))
 
+            # Clean up temp cleaned audio file
+            if tmp_clean and os.path.exists(tmp_clean):
+                try:
+                    os.remove(tmp_clean)
+                except Exception:
+                    pass
+
             self.after(0, self._done, lang)
 
         except Exception as exc:
+            if 'tmp_clean' in dir() and tmp_clean and os.path.exists(tmp_clean):
+                try:
+                    os.remove(tmp_clean)
+                except Exception:
+                    pass
             self.after(0, self._err, str(exc))
 
     # ── Speaker diarization ───────────────────────────────────────────────────

@@ -238,6 +238,8 @@ class Installer(tk.Tk):
                 ("faster-whisper", "faster-whisper"),
                 ("resemblyzer",    "resemblyzer (speaker detection)"),
                 ("scikit-learn",   "scikit-learn"),
+                ("noisereduce",    "noisereduce (audio cleaning)"),
+                ("soundfile",      "soundfile"),
             ]
             newly = []
             for pkg, label in packages:
