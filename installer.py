@@ -10,6 +10,8 @@ import shutil
 import sys
 import os
 
+VERSION = "1.3.2"
+
 # ── Install location ──────────────────────────────────────────────────────────
 INSTALL_DIR = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "TinyTalk")
 
@@ -59,7 +61,7 @@ FFMPEG_URL = (
 class Installer(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("TinyTalk — Setup")
+        self.title(f"TinyTalk {VERSION} — Setup")
         self.configure(bg=C_BG)
         self.resizable(False, False)
 

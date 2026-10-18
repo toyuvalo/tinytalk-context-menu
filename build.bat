@@ -31,6 +31,16 @@ if not exist dist\TinyTalk_Setup.exe (
     pause & exit /b 1
 )
 
+REM Code-sign (Azure Artifact Signing, publisher "Yuval Olsha"). Set NOSIGN=1 to skip.
+if not defined AZSIGN set "AZSIGN=G:\dev-tools\artifact-signing-client\azsign.cmd"
+if not defined NOSIGN (
+    call "%AZSIGN%" dist\TinyTalk_Setup.exe
+    if errorlevel 1 (
+        echo Signing failed. Check az login, or set NOSIGN=1.
+        pause & exit /b 1
+    )
+)
+
 echo.
 echo  ================================
 echo   Done: dist\TinyTalk_Setup.exe
